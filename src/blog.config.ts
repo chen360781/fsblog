@@ -1,10 +1,10 @@
 import type { SiteConfig } from "@/features/config/site-config.schema";
 
 export const blogConfig = {
-  title: "站点名称",
-  author: "作者",
+  title: "blog",
+  author: "备多一分",
   description:
-    "这是我的个人网站和博客。在这里，我主要分享与技术和生活相关的内容。欢迎阅读！",
+    "这是我的个人网站和博客。一个打工人的生活故事。欢迎阅读！",
   social: [
     { platform: "github", url: "https://github.com/example" },
     { platform: "email", url: "mailto:example@email.com" },
