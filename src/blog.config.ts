@@ -20,7 +20,7 @@ export const blogConfig = {
   },
   theme: {
     default: {
-      navBarName: "导航栏名称",
+      navBarName: "fuwari",
     },
     fuwari: {
       homeBg: "/images/home-bg.webp",
