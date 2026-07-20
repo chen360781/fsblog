@@ -4,6 +4,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import TableOfContents from "@tiptap/extension-table-of-contents";
 import type { Editor as TiptapEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { Markdown } from "@tiptap/markdown";
 import { toast } from "sonner";
 import {
   getActiveFormulaModalOpenerKey,
@@ -144,5 +145,11 @@ export const extensions = [
   }),
   TableOfContents.configure({
     getId: (text) => slugify(text),
+  }),
+  Markdown.configure({
+    markedOptions: {
+      gfm: true,
+      breaks: true,
+    },
   }),
 ];
