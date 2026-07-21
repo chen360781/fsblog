@@ -1,4 +1,4 @@
-import { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Fragment, Node as ProseMirrorNode, Slice } from "@tiptap/pm/model";
 import type {
   Extensions,
   JSONContent,
@@ -61,11 +61,15 @@ export const Editor = memo(function Editor({
   const markdownPasteRef = useRef(markdownPaste);
   markdownPasteRef.current = markdownPaste;
 
+  // 持有 editor 实例的 ref，供 clipboardTextParser 闭包使用（避免闭包引用 editor 自身导致 TS 循环推断为 any）
+  const editorRef = useRef<TiptapEditor | null>(null);
+
   const editor = useEditor({
     extensions,
     content,
     editable,
     onCreate: ({ editor: currentEditor }) => {
+      editorRef.current = currentEditor;
       onCreated?.(currentEditor);
     },
     onUpdate: ({ editor: currentEditor }) => {
@@ -83,27 +87,63 @@ export const Editor = memo(function Editor({
         ),
       },
       // 粘贴纯文本时，先尝试按 Markdown 解析（图床图片 ![](url) 等会渲染成节点）；
-      // 解析失败或普通文本则返回 null，回退 Tiptap 默认粘贴行为，不影响原功能。
-      clipboardTextParser: (text, context) => {
-        if (!markdownPasteRef.current) return null;
+      // 解析失败或普通文本则回退默认段落粘贴，不影响原功能。
+      // 注意：Tiptap 的 clipboardTextParser 签名要求返回 Slice（4 个参数），故此处用类型断言匹配。
+      clipboardTextParser: ((
+        text: string,
+        $context: {
+          doc: {
+            type: { schema: Parameters<typeof ProseMirrorNode.fromJSON>[0] };
+          };
+        },
+        _plain: boolean,
+        _view: unknown,
+      ) => {
+        const schema = $context.doc.type.schema;
+        const fallback = () => {
+          const nodes = text
+            .split(/\r\n?|\n/)
+            .map((line: string) =>
+              line
+                ? schema.nodes.paragraph.create(null, schema.text(line))
+                : schema.nodes.paragraph.create(),
+            );
+          return new Slice(Fragment.from(nodes), 0, 0);
+        };
+        if (!markdownPasteRef.current) return fallback();
         try {
           const md = (
-            editor as unknown as {
+            editorRef.current as unknown as {
               markdown?: { parse: (md: string) => JSONContent };
             }
           )?.markdown;
           const json = md?.parse(text);
           if (json && Array.isArray(json.content) && json.content.length > 0) {
-            return ProseMirrorNode.fromJSON(
-              context.schema,
-              json as unknown as Parameters<typeof ProseMirrorNode.fromJSON>[1],
-            ).content;
+            return new Slice(
+              ProseMirrorNode.fromJSON(
+                schema,
+                json as unknown as Parameters<
+                  typeof ProseMirrorNode.fromJSON
+                >[1],
+              ).content,
+              0,
+              0,
+            );
           }
         } catch {
           // 非 Markdown 内容：忽略，走默认粘贴逻辑
         }
-        return null;
-      },
+        return fallback();
+      }) as unknown as (
+        text: string,
+        $context: {
+          doc: {
+            type: { schema: Parameters<typeof ProseMirrorNode.fromJSON>[0] };
+          };
+        },
+        plain: boolean,
+        view: unknown,
+      ) => Slice,
     },
     immediatelyRender: false,
   });
