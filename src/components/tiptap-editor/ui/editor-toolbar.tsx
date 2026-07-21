@@ -25,8 +25,14 @@ import {
 import type React from "react";
 import { m } from "@/paraglide/messages";
 
+export type EditorViewMode = "edit" | "preview" | "compare";
+
 interface EditorToolbarProps {
   editor: Editor | null;
+  viewMode: EditorViewMode;
+  onViewModeChange: (mode: EditorViewMode) => void;
+  markdownPaste: boolean;
+  onMarkdownPasteChange: (v: boolean) => void;
   onLinkClick: () => void;
   onImageClick: () => void;
   onFormulaInlineClick: () => void;
@@ -64,6 +70,10 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({
 
 const EditorToolbar: React.FC<EditorToolbarProps> = ({
   editor,
+  viewMode,
+  onViewModeChange,
+  markdownPaste,
+  onMarkdownPasteChange,
   onLinkClick,
   onImageClick,
   onFormulaInlineClick,
@@ -140,6 +150,40 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   return (
     <div className="sticky top-0 z-30 mb-8 py-2 bg-background border-b border-border/50 flex flex-wrap items-center gap-1 px-4">
+      {/* 视图模式：编辑 / 预览 / 对比 */}
+      <div className="flex items-center border border-border rounded-md overflow-hidden mr-2">
+        {(["edit", "preview", "compare"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onViewModeChange(mode)}
+            className={clsx(
+              "h-8 px-3 text-xs font-medium transition-colors",
+              viewMode === mode
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/20",
+            )}
+          >
+            {mode === "edit" ? "编辑" : mode === "preview" ? "预览" : "对比"}
+          </button>
+        ))}
+      </div>
+
+      {/* Markdown 粘贴开关 */}
+      <button
+        type="button"
+        onClick={() => onMarkdownPasteChange(!markdownPaste)}
+        className={clsx(
+          "h-8 px-3 text-xs font-medium border border-border rounded-md transition-colors mr-2",
+          markdownPaste
+            ? "bg-foreground text-background"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/20",
+        )}
+        title="开启后粘贴纯文本按 Markdown 解析（标题/加粗/图片等）；关闭则原样粘贴"
+      >
+        MD粘贴
+      </button>
+
       {/* Headings */}
       <ToolbarButton
         onClick={() =>
