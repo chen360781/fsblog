@@ -1,3 +1,4 @@
+import { Fragment, Node as ProseMirrorNode, Slice } from "@tiptap/pm/model";
 import type {
   Extensions,
   JSONContent,
@@ -13,7 +14,7 @@ import {
   removeFormulaModalOpener,
   setActiveFormulaModalOpenerKey,
 } from "./formula-modal-store";
-import EditorToolbar from "./ui/editor-toolbar";
+import EditorToolbar, { type EditorViewMode } from "./ui/editor-toolbar";
 import type { FormulaMode } from "./ui/formula-modal";
 import { FormulaModal } from "./ui/formula-modal";
 import type { ModalType } from "./ui/insert-modal";
@@ -49,15 +50,33 @@ export const Editor = memo(function Editor({
     editContext: { pos: number; type: FormulaMode } | null;
   }>({ mode: "inline", initialLatex: "", editContext: null });
 
+  // 视图模式：edit=编辑(原富文本) / preview=预览 / compare=左右对比
+  const [viewMode, setViewMode] = useState<EditorViewMode>("edit");
+  const [previewHtml, setPreviewHtml] = useState("");
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+
+  // Markdown 粘贴开关：默认关闭，开启后粘贴纯文本才按 Markdown 解析
+  const [markdownPaste, setMarkdownPaste] = useState(false);
+  const markdownPasteRef = useRef(markdownPaste);
+  markdownPasteRef.current = markdownPaste;
+
+  // 持有 editor 实例的 ref，供 clipboardTextParser 闭包使用（避免闭包引用 editor 自身导致 TS 循环推断为 any）
+  const editorRef = useRef<TiptapEditor | null>(null);
+
   const editor = useEditor({
     extensions,
     content,
     editable,
     onCreate: ({ editor: currentEditor }) => {
+      editorRef.current = currentEditor;
       onCreated?.(currentEditor);
     },
     onUpdate: ({ editor: currentEditor }) => {
       onChange?.(currentEditor.getJSON());
+      if (viewModeRef.current !== "edit") {
+        setPreviewHtml(currentEditor.getHTML());
+      }
     },
     editorProps: {
       attributes: {
@@ -67,6 +86,64 @@ export const Editor = memo(function Editor({
           contentClassName,
         ),
       },
+      // 粘贴纯文本时，先尝试按 Markdown 解析（图床图片 ![](url) 等会渲染成节点）；
+      // 解析失败或普通文本则回退默认段落粘贴，不影响原功能。
+      // 注意：Tiptap 的 clipboardTextParser 签名要求返回 Slice（4 个参数），故此处用类型断言匹配。
+      clipboardTextParser: ((
+        text: string,
+        $context: {
+          doc: {
+            type: { schema: Parameters<typeof ProseMirrorNode.fromJSON>[0] };
+          };
+        },
+        _plain: boolean,
+        _view: unknown,
+      ) => {
+        const schema = $context.doc.type.schema;
+        const fallback = () => {
+          const nodes = text
+            .split(/\r\n?|\n/)
+            .map((line: string) =>
+              line
+                ? schema.nodes.paragraph.create(null, schema.text(line))
+                : schema.nodes.paragraph.create(),
+            );
+          return new Slice(Fragment.from(nodes), 0, 0);
+        };
+        if (!markdownPasteRef.current) return fallback();
+        try {
+          const md = (
+            editorRef.current as unknown as {
+              markdown?: { parse: (md: string) => JSONContent };
+            }
+          )?.markdown;
+          const json = md?.parse(text);
+          if (json && Array.isArray(json.content) && json.content.length > 0) {
+            return new Slice(
+              ProseMirrorNode.fromJSON(
+                schema,
+                json as unknown as Parameters<
+                  typeof ProseMirrorNode.fromJSON
+                >[1],
+              ).content,
+              0,
+              0,
+            );
+          }
+        } catch {
+          // 非 Markdown 内容：忽略，走默认粘贴逻辑
+        }
+        return fallback();
+      }) as unknown as (
+        text: string,
+        $context: {
+          doc: {
+            type: { schema: Parameters<typeof ProseMirrorNode.fromJSON>[0] };
+          };
+        },
+        plain: boolean,
+        view: unknown,
+      ) => Slice,
     },
     immediatelyRender: false,
   });
@@ -90,6 +167,16 @@ export const Editor = memo(function Editor({
     });
     setFormulaModalOpen(true);
   }, []);
+
+  const handleViewModeChange = useCallback(
+    (mode: EditorViewMode) => {
+      if (mode !== "edit" && editor) {
+        setPreviewHtml(editor.getHTML());
+      }
+      setViewMode(mode);
+    },
+    [editor],
+  );
 
   useEffect(() => {
     if (!editable) return;
@@ -185,6 +272,10 @@ export const Editor = memo(function Editor({
       {editable && (
         <EditorToolbar
           editor={editor}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+          markdownPaste={markdownPaste}
+          onMarkdownPasteChange={setMarkdownPaste}
           onLinkClick={openLinkModal}
           onImageClick={openImageModal}
           onFormulaInlineClick={() => openFormulaModal("inline")}
@@ -199,7 +290,26 @@ export const Editor = memo(function Editor({
         onMouseDownCapture={markActiveFormulaOpener}
         onFocusCapture={markActiveFormulaOpener}
       >
-        <EditorContent editor={editor} />
+        {viewMode === "edit" && <EditorContent editor={editor} />}
+
+        {viewMode === "preview" && (
+          <div
+            className="max-w-none text-lg leading-relaxed min-h-[500px] p-4 rounded-md bg-muted/20"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        )}
+
+        {viewMode === "compare" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-[500px]">
+            <div className="md:border-r md:border-border/50 md:pr-4">
+              <EditorContent editor={editor} />
+            </div>
+            <div
+              className="max-w-none text-lg leading-relaxed md:pl-2 p-4 rounded-md bg-muted/20"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </div>
+        )}
       </div>
 
       {editable && (
