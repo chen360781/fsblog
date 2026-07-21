@@ -1,10 +1,10 @@
+import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type {
   Extensions,
   JSONContent,
   Editor as TiptapEditor,
 } from "@tiptap/react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { normalizeLinkHref } from "@/lib/links/normalize-link-href";
 import { cn } from "@/lib/utils";
@@ -94,7 +94,10 @@ export const Editor = memo(function Editor({
           )?.markdown;
           const json = md?.parse(text);
           if (json && Array.isArray(json.content) && json.content.length > 0) {
-            return ProseMirrorNode.fromJSON(context.schema, json).content;
+            return ProseMirrorNode.fromJSON(
+              context.schema,
+              json as unknown as Parameters<typeof ProseMirrorNode.fromJSON>[1],
+            ).content;
           }
         } catch {
           // 非 Markdown 内容：忽略，走默认粘贴逻辑
