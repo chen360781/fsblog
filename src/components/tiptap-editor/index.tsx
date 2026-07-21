@@ -4,6 +4,7 @@ import type {
   Editor as TiptapEditor,
 } from "@tiptap/react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { normalizeLinkHref } from "@/lib/links/normalize-link-href";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,7 @@ import {
   removeFormulaModalOpener,
   setActiveFormulaModalOpenerKey,
 } from "./formula-modal-store";
-import EditorToolbar from "./ui/editor-toolbar";
+import EditorToolbar, { type EditorViewMode } from "./ui/editor-toolbar";
 import type { FormulaMode } from "./ui/formula-modal";
 import { FormulaModal } from "./ui/formula-modal";
 import type { ModalType } from "./ui/insert-modal";
@@ -49,6 +50,17 @@ export const Editor = memo(function Editor({
     editContext: { pos: number; type: FormulaMode } | null;
   }>({ mode: "inline", initialLatex: "", editContext: null });
 
+  // 视图模式：edit=编辑(原富文本) / preview=预览 / compare=左右对比
+  const [viewMode, setViewMode] = useState<EditorViewMode>("edit");
+  const [previewHtml, setPreviewHtml] = useState("");
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+
+  // Markdown 粘贴开关：默认关闭，开启后粘贴纯文本才按 Markdown 解析
+  const [markdownPaste, setMarkdownPaste] = useState(false);
+  const markdownPasteRef = useRef(markdownPaste);
+  markdownPasteRef.current = markdownPaste;
+
   const editor = useEditor({
     extensions,
     content,
@@ -58,6 +70,9 @@ export const Editor = memo(function Editor({
     },
     onUpdate: ({ editor: currentEditor }) => {
       onChange?.(currentEditor.getJSON());
+      if (viewModeRef.current !== "edit") {
+        setPreviewHtml(currentEditor.getHTML());
+      }
     },
     editorProps: {
       attributes: {
@@ -66,6 +81,25 @@ export const Editor = memo(function Editor({
           !editable && "min-h-0 text-base leading-7",
           contentClassName,
         ),
+      },
+      // 粘贴纯文本时，先尝试按 Markdown 解析（图床图片 ![](url) 等会渲染成节点）；
+      // 解析失败或普通文本则返回 null，回退 Tiptap 默认粘贴行为，不影响原功能。
+      clipboardTextParser: (text, context) => {
+        if (!markdownPasteRef.current) return null;
+        try {
+          const md = (
+            editor as unknown as {
+              markdown?: { parse: (md: string) => JSONContent };
+            }
+          )?.markdown;
+          const json = md?.parse(text);
+          if (json && Array.isArray(json.content) && json.content.length > 0) {
+            return ProseMirrorNode.fromJSON(context.schema, json).content;
+          }
+        } catch {
+          // 非 Markdown 内容：忽略，走默认粘贴逻辑
+        }
+        return null;
       },
     },
     immediatelyRender: false,
@@ -90,6 +124,16 @@ export const Editor = memo(function Editor({
     });
     setFormulaModalOpen(true);
   }, []);
+
+  const handleViewModeChange = useCallback(
+    (mode: EditorViewMode) => {
+      if (mode !== "edit" && editor) {
+        setPreviewHtml(editor.getHTML());
+      }
+      setViewMode(mode);
+    },
+    [editor],
+  );
 
   useEffect(() => {
     if (!editable) return;
@@ -185,6 +229,10 @@ export const Editor = memo(function Editor({
       {editable && (
         <EditorToolbar
           editor={editor}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+          markdownPaste={markdownPaste}
+          onMarkdownPasteChange={setMarkdownPaste}
           onLinkClick={openLinkModal}
           onImageClick={openImageModal}
           onFormulaInlineClick={() => openFormulaModal("inline")}
@@ -199,7 +247,26 @@ export const Editor = memo(function Editor({
         onMouseDownCapture={markActiveFormulaOpener}
         onFocusCapture={markActiveFormulaOpener}
       >
-        <EditorContent editor={editor} />
+        {viewMode === "edit" && <EditorContent editor={editor} />}
+
+        {viewMode === "preview" && (
+          <div
+            className="max-w-none text-lg leading-relaxed min-h-[500px] p-4 rounded-md bg-muted/20"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        )}
+
+        {viewMode === "compare" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-[500px]">
+            <div className="md:border-r md:border-border/50 md:pr-4">
+              <EditorContent editor={editor} />
+            </div>
+            <div
+              className="max-w-none text-lg leading-relaxed md:pl-2 p-4 rounded-md bg-muted/20"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </div>
+        )}
       </div>
 
       {editable && (
